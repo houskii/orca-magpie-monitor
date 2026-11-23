@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#20232a;--muted:#727782;--border:#e0e3e9;--card:#f4f5f8;--danger:#d32f40;--warning:#a56b00;--success:#18814a;--accent:#8a46ce}
+@media(prefers-color-scheme:dark){:root{--bg:#252833;--fg:#f2f3f7;--muted:#adb3c0;--border:#3d414f;--card:#2e3240;--danger:#ff6b7b;--warning:#f2c354;--success:#68d69a;--accent:#c399ff}}
+*{box-sizing:border-box}body{margin:0;padding:18px;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,sans-serif;border:1px solid var(--border);border-radius:13px;height:100vh;display:flex;flex-direction:column;gap:12px}header{display:flex;align-items:center;justify-content:space-between}h1{font-size:16px;margin:0}button{border:0;background:transparent;color:var(--muted);font-size:23px;cursor:pointer}.muted{color:var(--muted);font-size:11px}.quotas{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quota{background:var(--card);padding:10px;border-radius:8px;font-size:12px}.quota small{display:block;color:var(--muted);font-size:10px;margin-top:6px}.danger{color:var(--danger)}.warning{color:var(--warning)}.success{color:var(--success)}.accent{color:var(--accent)}.neutral{color:var(--muted)}#list{overflow:auto;flex:1;min-height:0}.row{border-top:1px solid var(--border);padding:12px 0}.head{display:flex;gap:12px;align-items:start;justify-content:space-between}.title{font-weight:600;line-height:1.5;word-break:break-word}.speed{font-size:17px;font-weight:650;white-space:nowrap;font-variant-numeric:tabular-nums}.meta{display:flex;justify-content:space-between;gap:8px;margin-top:5px}.prompt{line-height:1.5;font-size:12px;margin-top:6px;color:var(--muted);overflow-wrap:anywhere}.tag{font-size:10px;color:var(--accent);margin-left:6px}footer{border-top:1px solid var(--border);padding-top:9px}
+</style>
+<style>
+.speed{display:flex;align-items:center;gap:6px}.model-icon{display:inline-block;flex:none;width:18px;height:18px}.quotas{max-height:180px;overflow:auto;flex-shrink:0}
+</style>
+<header><h1>全部对话与速度</h1><button aria-label="关闭" onclick="window.webkit.messageHandlers.close.postMessage({})">×</button></header>
+<div id="quotas" class="quotas"></div><div id="summary" class="muted"></div><div id="error" class="danger"></div><div id="list"></div>
+<footer class="muted">Magpie 显示生成均速；Antigravity 原生请求均速包含首字等待。未提供的实时速度显示 —T/s。按 Esc 关闭。</footer>
+<script src="icons/icons.js"></script><script>
+function node(tag,cls,text){const e=document.createElement(tag);e.className=cls||'';if(text!==undefined)e.textContent=text;return e}
+function speedNode(s){const e=node('div','speed '+s.tone),kind=['claude','gpt','deepseek'].includes(s.icon)?s.icon:'zap';const icon=new DOMParser().parseFromString(window.modelIcons[kind],'image/svg+xml').documentElement;icon.setAttribute('class','model-icon');icon.setAttribute('role','img');icon.setAttribute('aria-label',({claude:'Claude',gpt:'GPT',deepseek:'DeepSeek',zap:'模型'})[kind]);e.append(icon,node('span','',s.speed));return e}
+window.render=function(data){
+ const q=document.getElementById('quotas');q.replaceChildren();q.style.display=data.quotas.length?'':'none';for(const v of data.quotas){const box=node('div','quota');box.append(node('strong',v.tone,v.name+' '+v.value));if(v.detail)box.append(node('small','',v.detail));if(v.reset)box.append(node('small','', (v.resetLabel||'重置')+' '+v.reset));q.append(box)}
+ document.getElementById('summary').textContent=data.sessions.filter(v=>v.active).length+' 个运行中 · '+data.sessions.length+' 个对话 · 按均速降序';
+ document.getElementById('error').textContent=data.error||data.quotaError||'';
+ const list=document.getElementById('list'),scroll=list.scrollTop;list.replaceChildren();
+ for(const s of data.sessions){const row=node('div','row'),head=node('div','head'),title=node('div','title',s.title);if(s.current)title.append(node('span','tag','当前'));head.append(title,speedNode(s));row.append(head);const meta=node('div','meta muted');meta.append(node('span','',s.model+' · '+(s.activity||(s.active?'运行中':'空闲'))),node('span','', '实时 '+s.live));row.append(meta);row.append(node('div','muted',(s.startedLabel||'首个请求')+'：'+s.startedAt));if(s.speedNote)row.append(node('div','muted',s.speedNote));if(s.statsError)row.append(node('div','warning',s.statsError));if(s.prompt)row.append(node('div','prompt',s.prompt));list.append(row)}
+ if(!data.sessions.length)list.append(node('div','muted','尚无 Magpie 对话记录'));list.scrollTop=scroll;
+};
+</script></html>

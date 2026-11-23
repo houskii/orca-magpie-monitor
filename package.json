@@ -1,0 +1,19 @@
+{
+  "name": "orca-magpie-monitor",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "stage": "node scripts/stage.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.7",
+    "typescript": "5.9.3"
+  },
+  "version": "0.4.0",
+  "license": "MIT",
+  "description": "Orca session TPS, token, cache and quota monitor for Magpie-compatible gateways",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/houskii/orca-magpie-monitor.git"
+  }
+}
