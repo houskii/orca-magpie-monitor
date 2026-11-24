@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "magpie-monitor",
   "name": "Magpie 用量与速度",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "读取 Magpie 或兼容网关的额度与会话 TPS、Token、缓存统计，支持 Antigravity 原生测速。",
   "engines": {
     "orca": ">=1.4.258"
@@ -76,6 +76,13 @@
         "type": "string",
         "default": "auto",
         "description": "auto 跟随当前会话实际使用的供应商。没有活动会话时显示首个可用来源。也可在面板中手动固定来源。"
+      },
+      {
+        "key": "ignoredQuotaModels",
+        "title": "忽略额度检测的模型",
+        "type": "string",
+        "default": "",
+        "description": "按模型系列忽略账号额度检测，例如 gpt, gemini；支持 * 通配符，英文或中文逗号、空格、换行分隔。匹配时跳过额度查询和展示，保留 TPS、Token 和缓存统计。实际响应模型优先于会话配置。"
       },
       {
         "key": "baseURL",

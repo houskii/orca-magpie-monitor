@@ -9,7 +9,7 @@
 - 兼容 Orca 的 journal、domain 会话存储。没有网关测速记录时，仍可显示已识别的 agent、模型和思考强度。
 - 原生 Antigravity 会话可读取本机运行时统计，不要求请求经过 Magpie。
 
-当前版本 **0.4.1**。适用于 macOS 12+、Orca **1.4.258+**。弹窗包含 Apple Silicon 与 Intel 通用二进制。已在 Orca 1.4.271 验证存储兼容。Antigravity 原生统计适配 ACP 1.5.2，并需要 worker 支持 `node:sqlite`。
+当前版本 **0.4.2**。适用于 macOS 12+、Orca **1.4.258+**。弹窗包含 Apple Silicon 与 Intel 通用二进制。已在 Orca 1.4.271 验证存储兼容。Antigravity 原生统计适配 ACP 1.5.2，并需要 worker 支持 `node:sqlite`。
 
 ## 安装
 
@@ -20,7 +20,7 @@ orca plugin install houskii/orca-magpie-monitor
 也可固定版本：
 
 ```sh
-orca plugin install houskii/orca-magpie-monitor@v0.4.0
+orca plugin install houskii/orca-magpie-monitor@v0.4.2
 ```
 
 首次安装时，Orca 会显示插件权限和来源。检查后，按 Orca 返回的命令完成授权；每个安装者使用自己机器上生成的授权信息。
@@ -35,11 +35,14 @@ orca plugin install houskii/orca-magpie-monitor@v0.4.0
 | --- | --- | --- |
 | 统计网关地址 | `http://127.0.0.1:3425` | Magpie 或兼容网关的根地址，可含路径前缀。远程连接使用 HTTPS。 |
 | 额度来源 ID | `auto` | 跟随当前会话实际用的供应商。没有活动会话时，选择网关返回的首个有效来源。也可固定为指定来源。 |
+| 忽略额度检测的模型 | 空 | 例如 `gpt, gemini`。匹配模型系列或 `*` 通配符，跳过额度查询和展示，保留 TPS、Token 和缓存统计。 |
 | 显示网关账号额度 | 开启 | 关闭后停止额度请求，保留会话速度与用量。 |
 | 网关 Token 环境变量 | 空 | 需要 Bearer 认证时，填写 Orca worker 可见的环境变量名。不要填写 Token 本身。 |
 | 速度采样间隔 | 1 秒 | 可设置为 1～10 秒。 |
 
 额度属于账号，同一个账号的多个会话共享额度。自动模式随当前会话切换，手动模式保持所选来源。比如 Claude 模型走 `gemini-cchost` 时，自动模式显示 cchost 的 Gemini 额度。点击刷新只查询当前显示的来源。
+
+忽略规则不区分大小写，可用逗号、空格或换行分隔。`gpt` 匹配 GPT 系列，`gemini*` 匹配 Gemini 系列，`*flash*` 匹配名称中含 flash 的模型。带供应商前缀的模型名也能匹配，例如 `gateway/gpt-6`。规则优先匹配当前会话实际返回的模型；还没有请求记录时，使用会话配置的模型。模型命中后，即使手动固定了额度来源，也不会请求该来源。切换到其他模型后自动恢复检测。
 
 其他网关需要实现 [统计接口约定](docs/gateway-api.md)。仅兼容 OpenAI 或 Anthropic 的聊天接口，不能提供历史会话速度和账号额度。
 

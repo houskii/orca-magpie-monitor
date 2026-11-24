@@ -1,5 +1,6 @@
 import type { ConversationAgent, QuotaCard, QuotaWindow, Session, Snapshot } from './protocol'
 import { isOrca, quotaSelection } from './metrics'
+import { ignoredQuotaModel } from './model-filter'
 export type Tone = 'neutral' | 'danger' | 'warning' | 'success' | 'accent'
 export const speedValue = (s: Session): number => s.averageTPS ?? 0
 export const meanLabel = (s: Session): string => s.statsSource === 'antigravity-native' ? '原生请求均速' : '对话生成均速'
@@ -34,9 +35,17 @@ export function currentQuota(state: Snapshot) {
   const session = currentSession(state)
   const source = state.focusedConversation ? session?.quotaProvider || session?.provider || '' : undefined
   const binding = quotaSelection(state.cards, state.quotaProvider, source)
+  const model = session?.model || state.focusedConversation?.model || ''
+  const ignored = !!ignoredQuotaModel(model, state.ignoredQuotaModels || [])
   return {
     ...binding,
-    error: !state.quotaErrorProvider || state.quotaErrorProvider === binding.provider ? state.quotaError : null,
+    ignored,
+    model,
+    provider: ignored ? '' : binding.provider,
+    cards: ignored ? [] : binding.cards,
+    card: ignored ? undefined : binding.card,
+    message: ignored ? '当前模型已跳过账号额度检测。' : binding.message,
+    error: ignored ? null : !state.quotaErrorProvider || state.quotaErrorProvider === binding.provider ? state.quotaError : null,
   }
 }
 export const compactTokens = (v:number|null|undefined):string => typeof v==='number'&&Number.isFinite(v)

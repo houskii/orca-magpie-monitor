@@ -2,6 +2,7 @@ import { defineCheck } from 'orca/testing'
 import { activeSnapshot, cchostSnapshot, sampleSnapshot } from './fixtures'
 const data = sampleSnapshot()
 export default defineCheck({
+  ignoredModel: { requests: { 'monitor.get': () => ({ ...data, ignoredQuotaModels: ['gpt'], focusedConversation: { orcaSession: 'focused', session: data.sessions[0].session, workspace: '', title: '当前对话', model: data.sessions[0].model }, quotaError: 'ignored quota error' }) } },
   ready: { requests: { 'monitor.get': () => data } },
   offline: { requests: { 'monitor.get': () => ({ ...data, speedError: '无法读取统计网关，会话速度已暂停更新' }) } },
   running: { requests: { 'monitor.get': () => activeSnapshot() } },

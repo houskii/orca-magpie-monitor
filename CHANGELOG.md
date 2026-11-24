@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Skip account quota checks by configured model families or wildcard rules, independently of the gateway provider.
+- Hide skipped quotas and their errors while preserving session TPS, Token and cache statistics.
+- Cancel quota requests when switching to an ignored model; resume automatically for other models.
+
 ## 0.4.1
 
 - Follow the focused conversation's actual provider in automatic quota mode.

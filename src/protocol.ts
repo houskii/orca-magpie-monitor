@@ -15,13 +15,13 @@ export type Session = {
 }
 export type Snapshot = {
   checkedAt: number; cards: QuotaCard[]; sessions: Session[]; quotaError: string | null; quotaErrorProvider?: string;
-  showQuota: boolean; quotaProvider: string;
+  showQuota: boolean; quotaProvider: string; ignoredQuotaModels?: string[];
   speedError: string | null; conversationError: string | null; selectedSession: string; baseURL: string;
   omittedSessions?:number;
   focusedConversation?: FocusedConversation | null; focusError?: string | null;
 }
 export const emptySnapshot = (): Snapshot => ({ checkedAt: 0, cards: [], sessions: [], quotaError: null,
-  showQuota: true, quotaProvider: 'auto',
+  showQuota: true, quotaProvider: 'auto', ignoredQuotaModels: [],
   speedError: null, conversationError: null, selectedSession: '', baseURL: 'http://127.0.0.1:3425', focusedConversation: null, focusError: null })
 declare module 'orca' {
   interface PluginRequests {

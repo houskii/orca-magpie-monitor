@@ -15,12 +15,14 @@ export async function boundedJSON(response:Response):Promise<unknown>{
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 export function panelSnapshot(state:Snapshot):Snapshot{
-  const provider = currentQuota(state).provider
+  const binding = currentQuota(state), provider = binding.provider
   const current = currentSession(state)
   const sessions = state.sessions.slice(0,MAX_SESSIONS)
   if(current&&!sessions.some(s=>s.key===current.key))sessions.splice(MAX_SESSIONS-1,1,current)
   let result:Snapshot={...state,
-    cards:state.showQuota?state.cards.map(c=>c.provider===provider?c:{...c,windows:[],balance:''}):[],
+    cards:state.showQuota&&!binding.ignored?state.cards.map(c=>c.provider===provider?c:{...c,windows:[],balance:''}):[],
+    quotaError:binding.ignored?null:state.quotaError,
+    quotaErrorProvider:binding.ignored?'':state.quotaErrorProvider,
     sessions,omittedSessions:(state.omittedSessions||0)+Math.max(0,state.sessions.length-MAX_SESSIONS)}
   const size=()=>new TextEncoder().encode(JSON.stringify(result)).byteLength
   if(size()>MAX_PANEL_BYTES)result={...result,sessions:result.sessions.map(s=>({...s,conversation:s.conversation?{...s.conversation,prompt:s.conversation.prompt.slice(0,160)}:undefined}))}

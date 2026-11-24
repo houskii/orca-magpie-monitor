@@ -15,6 +15,66 @@ const withUsage=(send:typeof fetch):typeof fetch=>async(input,init)=>{
  return send(input,init)
 }
 
+test('ignored models skip every quota request from startup and resume for another model', async () => {
+  let focus: FocusedConversation = { orcaSession: 'focused', session: 'ignored', workspace: 'workspace', title: '当前对话' }
+  const requested: string[] = []
+  let stop: (() => void) | undefined
+  const send: typeof fetch = async input => {
+    const url = String(input); requested.push(url)
+    return Response.json(url.includes('/trace') ? { routes: [
+      rawRoute(1, 'ignored', { model: 'gateway/GPT-6-sol', provider: 'wallet' }),
+      rawRoute(2, 'allowed', { model: 'claude-opus', provider: 'wallet' }),
+    ] } : { data: [{ provider: 'wallet', balance: '$42' }] })
+  }
+  const module = { default(orca: OrcaWorkerApi) { stop = activateMonitor(orca, {
+    send: withUsage(send), background: false, conversations: async () => [], focus: async () => focus,
+  }) }, deactivate() { stop?.() } }
+  const host = mockHost({ capabilities: ['settings:own', 'storage:own'], settings: { ignoredQuotaModels: 'gpt, gemini', quotaProvider: 'wallet' } })
+  const worker = await mountWorker(module, { host, commands: ['magpie.refresh', 'magpie.sessions'] })
+  await worker.request('monitor.get')
+  const ignored = await worker.request('monitor.refresh')
+  assert.equal(requested.some(url => url.includes('/quotas')), false)
+  assert.deepEqual(ignored.cards, []); assert.equal(ignored.quotaError, null)
+  assert.equal(ignored.sessions[0].averageTPS, 100)
+  const bars = host.callsOf('statusBar.update') as { id: string; visible: boolean }[]
+  for (const id of ['quota5h', 'quota7d']) assert.equal(bars.filter(c => c.id === id).at(-1)?.visible, false)
+  focus = { ...focus, session: 'allowed' }
+  const allowed = await worker.request('monitor.refresh')
+  assert.equal(popupData(allowed).quotas[0].value, '$42')
+  assert.ok(requested.some(url => url.endsWith('/quotas/refresh?provider=wallet')))
+  await worker.deactivate()
+})
+
+test('switching to an ignored model cancels pending quota reads and discards their late results', async () => {
+  let focus: FocusedConversation = { orcaSession: 'focused', session: 'allowed', workspace: 'workspace', title: '当前对话' }
+  let resolveQuota: ((r: Response) => void) | undefined
+  let quotaSignal: AbortSignal | null | undefined
+  let stop: (() => void) | undefined
+  const send: typeof fetch = async (input, init) => {
+    if (String(input).includes('/trace')) return Response.json({ routes: [
+      rawRoute(1, 'allowed', { model: 'claude-opus' }), rawRoute(2, 'ignored', { model: 'gemini-4-pro' }),
+    ] })
+    quotaSignal = init?.signal
+    return new Promise<Response>(resolve => { resolveQuota = resolve })
+  }
+  const module = { default(orca: OrcaWorkerApi) { stop = activateMonitor(orca, {
+    send: withUsage(send), background: false, conversations: async () => [], focus: async () => focus,
+  }) }, deactivate() { stop?.() } }
+  const worker = await mountWorker(module, { host: mockHost({ capabilities: ['settings:own', 'storage:own'], settings: { ignoredQuotaModels: 'gemini' } }), commands: ['magpie.refresh', 'magpie.sessions'] })
+  const initial = worker.request('monitor.get')
+  for (let i = 0; !resolveQuota && i < 250; i++) await new Promise(resolve => setTimeout(resolve, 1))
+  assert.ok(resolveQuota)
+  focus = { ...focus, session: 'ignored' }
+  const changed = await worker.request('monitor.refresh')
+  assert.equal(quotaSignal?.aborted, true)
+  assert.deepEqual(changed.cards, [])
+  resolveQuota!(Response.json({ data: [{ provider: 'openai', balance: '$999' }] }))
+  await initial
+  const result = await worker.request('monitor.get')
+  assert.deepEqual(result.cards, []); assert.equal(result.quotaError, null)
+  await worker.deactivate()
+})
+
 test('auto discovers the gateway provider and refreshes only its actual ID', async () => {
   const posts: string[] = []
   let stop: (() => void) | undefined

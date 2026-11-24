@@ -95,3 +95,31 @@ test('the same Claude model uses the focused account source and its own reset ti
   state.quotaProvider = 'gemini-cchost'
   assert.equal(currentQuota(state).provider, 'gemini-cchost')
 })
+
+test('ignored model families hide quotas and errors even for a manually selected source', () => {
+  const state = cchostSnapshot('gemini')
+  state.ignoredQuotaModels = ['gpt', 'gemini*']
+  // The gateway source is named Gemini, but the actual response model is Claude.
+  state.focusedConversation!.model = 'gemini-4-pro'
+  assert.equal(currentQuota(state).ignored, false)
+  const session = state.sessions.find(s => s.session === 'gemini')!
+  session.model = 'gateway/GPT-6-sol'
+  session.averageTPS = 42
+  state.quotaProvider = 'claude-cchost'
+  state.quotaError = 'old quota failure'
+  const binding = currentQuota(state)
+  assert.equal(binding.ignored, true)
+  assert.equal(binding.provider, '')
+  assert.equal(binding.error, null)
+  const snapshot = panelSnapshot(state), popup = popupData(snapshot)
+  assert.deepEqual(snapshot.cards, [])
+  assert.equal(snapshot.quotaError, null)
+  assert.deepEqual(popup.quotas, [])
+  assert.equal(popup.quotaError, null)
+  assert.ok(popup.sessions.some(s => s.model === session.model && s.speed === '42T/s'))
+  state.sessions = []
+  state.focusedConversation!.model = 'gemini-4-pro'
+  assert.equal(currentQuota(state).ignored, true)
+  state.focusedConversation!.model = 'claude-opus'
+  assert.equal(currentQuota(state).ignored, false)
+})

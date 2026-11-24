@@ -2,6 +2,20 @@ import { assert, mockHost, mount, test } from 'orca/testing'
 import * as panel from './panel'
 import { sampleSnapshot } from './fixtures'
 import { parseCards } from './metrics'
+test('ignored models leave session metrics visible without quota controls, cards or errors', async () => {
+  const data = sampleSnapshot(), session = data.sessions[0]
+  data.ignoredQuotaModels = ['gpt']
+  data.focusedConversation = { orcaSession: 'focused', session: session.session, workspace: 'workspace', title: '当前对话', model: session.model }
+  data.quotaError = 'old quota failure'
+  const view = await mount(panel, { host: mockHost({ requests: { 'monitor.get': () => data } }) })
+  assert.ok(view.find({ text: '当前模型已跳过账号额度检测。' }))
+  assert.ok(view.find({ text: '对话生成均速 100T/s' }))
+  assert.equal(view.findAll({ label: '额度来源' }).length, 0)
+  assert.equal(view.findAll({ text: 'old quota failure' }).length, 0)
+  assert.equal(view.findAll({ text: '剩余 52%' }).length, 0)
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
 test('sidebar shows every conversation by title and content and opens the popup', async () => {
   const data=sampleSnapshot();let opened=0
   const host=mockHost({requests:{'monitor.get':()=>data,'monitor.refresh':()=>data,'monitor.popup':()=>{opened++;return {opened:true}}}})

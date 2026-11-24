@@ -37,7 +37,7 @@ export default function Panel() {
     <Row justify="between"><Heading>Magpie</Heading><Button icon="refresh" size="sm" variant="ghost" disabled={read(busy)} onPress={refresh}>刷新</Button></Row>
     {(read(failure) || data.speedError || data.showQuota && binding.error) && <Callout tone="warning" title="数据暂未更新"><Text>{read(failure) || data.speedError || binding.error}</Text></Callout>}
     <Switch label="显示网关账号额度" checked={data.showQuota} disabled={read(busy)} onChange={enabled => { void configureQuota({ enabled }) }} />
-    {data.showQuota && <Select label="额度来源" value={data.quotaProvider} options={sources} disabled={read(busy)} onChange={provider => { void configureQuota({ provider }) }} />}
+    {data.showQuota && !binding.ignored && <Select label="额度来源" value={data.quotaProvider} options={sources} disabled={read(busy)} onChange={provider => { void configureQuota({ provider }) }} />}
     <Card title="当前会话自动绑定"><Stack gap="xs">
       <Text>{data.focusedConversation ? data.focusedConversation.title || '当前对话' : '当前页面无可绑定的本机会话'}</Text>
       {conversationAgentLabel(data.focusedConversation) && <Text muted size="xs">{conversationAgentLabel(data.focusedConversation)}</Text>}

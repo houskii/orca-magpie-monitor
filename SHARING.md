@@ -11,14 +11,14 @@ orca plugin install houskii/orca-magpie-monitor
 固定到当前版本：
 
 ```sh
-orca plugin install houskii/orca-magpie-monitor@v0.4.0
+orca plugin install houskii/orca-magpie-monitor@v0.4.2
 ```
 
 Orca 会先显示插件来源和权限。首次安装按返回的说明完成授权。更新时再次运行安装命令即可；已有设置保留。
 
 ## 从 ZIP 安装
 
-从 [GitHub Releases](https://github.com/houskii/orca-magpie-monitor/releases) 下载 `orca-magpie-monitor-0.4.0-macos-universal.zip` 并解压，将目录放在准备长期保留的位置：
+从 [GitHub Releases](https://github.com/houskii/orca-magpie-monitor/releases) 下载 `orca-magpie-monitor-0.4.2-macos-universal.zip` 并解压，将目录放在准备长期保留的位置：
 
 ```sh
 orca plugin install /absolute/path/orca-magpie-monitor
@@ -31,6 +31,8 @@ orca plugin install /absolute/path/orca-magpie-monitor
 在 **Orca → Settings → Plugins → Magpie 用量与速度** 中设置网关地址。默认连接本机 Magpie：`http://127.0.0.1:3425`。其他端口、远程 HTTPS 和路径前缀也可配置。
 
 账号额度默认使用 `auto`，从网关返回的数据中选择首个有效来源。可以在面板里固定来源，或关闭账号额度，只保留速度、Token 和缓存统计。旧版本保存的来源不会被覆盖，需要时手动改成 `auto`。
+
+需要跳过某些模型的额度检测时，在 **忽略额度检测的模型** 中填 `gpt, gemini` 等规则。支持模型名前缀和 `*` 通配符；命中后不查询、不展示账号额度，也不提示额度读取失败，测速和会话统计继续工作。
 
 网关要求 Bearer 认证时，在设置中填写环境变量名，例如 `MAGPIE_MONITOR_TOKEN`，并确保该变量对 Orca 的 worker 进程可见。变量值不要填在网关 URL 或来源 ID 中。
 

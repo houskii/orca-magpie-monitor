@@ -9,6 +9,7 @@ import { createPopup, type MonitorPopup } from './popup'
 import { attachUsage, readSessionUsage, usageKey, type SessionUsage } from './usage-source'
 import { boundedJSON, MAX_SESSIONS, panelSnapshot } from './bounds'
 import { readAntigravitySession } from './antigravity-source'
+import { parseIgnoredQuotaModels } from './model-filter'
 
 type MonitorOptions = { send?: typeof fetch; clock?: () => number; background?: boolean;
   conversations?: (sessions: string[]) => Promise<ConversationPreview[]>;
@@ -22,6 +23,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   let pending: Promise<Snapshot> | null = null, quotaTask: Promise<void> | null = null
   let quotaRevision = 0, quotaCancel: AbortController | null = null, writingSettings = false
   let gatewayToken = ''
+  let quotaIgnored = false
   let conversationTask: Promise<void> | null = null, conversationAt = -Infinity
   let focusTask: Promise<void> | null = null, focusAt = -Infinity
   let historyRow: Session | null = null
@@ -51,7 +53,14 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   }
   async function publish(): Promise<void> {
     if (stopped) return
-    const binding = currentQuota(state), card = binding.card
+    let binding = currentQuota(state)
+    if (binding.ignored !== quotaIgnored) {
+      quotaIgnored = binding.ignored
+      quotaRevision++; quotaCancel?.abort(); quotaCancel = null; quotaTask = null; quotaAt = -Infinity
+      state = { ...state, quotaError: null, quotaErrorProvider: '' }
+      binding = currentQuota(state)
+    }
+    const card = binding.card
     const update = async (item: Parameters<typeof orca.host.call<'statusBar.update'>>[1]) => {
       const json = JSON.stringify(item)
       if (barCache.get(item.id) === json) return
@@ -70,7 +79,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     const primary = (numeric.length ? numeric : windows).slice(0, 2)
     for (const [i, id] of ['quota5h', 'quota7d'].entries()) {
       const w = primary[i], label = w ? quotaWindowName(w.name, w.pool) + (card?.averaged ? ' 均值' : '') : '额度'
-      await update({ id, icon: 'gauge', visible: state.showQuota && (!!w || i === 0),
+      await update({ id, icon: 'gauge', visible: state.showQuota && !binding.ignored && (!!w || i === 0),
         text: binding.provider ? `${i === 0 ? binding.label + ' ' : ''}${label} ${w ? quotaLabel(w) : binding.cards.length > 1 ? `${binding.cards.length} 个账号 · 见面板` : '未取得'}${w?.resetsAt ? ' ↻' + resetTime(w.resetsAt, true) : ''}${binding.error ? ' · 待更新' : ''}` : '额度 · 等待来源',
         tone: quotaTone(w?.remaining ?? null),
         tooltip: `${label} ${quotaLabel(w)}${card?.averaged && w ? `\n${w.samples}/${binding.cards.length} 个账号参与平均` : ''}${w?.resetsAt ? (card?.averaged ? '\n最早重置：' : '\n下次重置：') + resetTime(w.resetsAt) : ''}\n${binding.message}${binding.error ? '\n' + binding.error : ''}${binding.provider ? '\n点击刷新 ' + binding.label + '。' : ''}` })
@@ -207,11 +216,11 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     return conversationTask
   }
   function quotas(base: string, force: boolean): Promise<void> {
-    if (!state.showQuota) return Promise.resolve()
+    if (!state.showQuota || currentQuota(state).ignored) return Promise.resolve()
     if (quotaTask) return quotaTask
     const revision = quotaRevision, cancel = new AbortController()
     quotaCancel = cancel
-    const current = () => !stopped && state.baseURL === base && state.showQuota && quotaRevision === revision
+    const current = () => !stopped && state.baseURL === base && state.showQuota && !currentQuota(state).ignored && quotaRevision === revision
     quotaAt = clock()
     const task = (async () => {
       function accept(payload: unknown, partial = false, target?: string): void {
@@ -276,16 +285,17 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
         gatewayToken = token || ''
         const showQuota = settings.showQuota !== false
         const quotaProvider = typeof settings.quotaProvider === 'string' && settings.quotaProvider.trim() ? settings.quotaProvider.trim().slice(0, 256) : 'auto'
-        if (gatewayChanged || state.showQuota !== showQuota || state.quotaProvider !== quotaProvider) {
+        const ignoredQuotaModels = parseIgnoredQuotaModels(settings.ignoredQuotaModels)
+        if (gatewayChanged || state.showQuota !== showQuota || state.quotaProvider !== quotaProvider
+            || JSON.stringify(state.ignoredQuotaModels || []) !== JSON.stringify(ignoredQuotaModels)) {
           quotaRevision++; quotaCancel?.abort(); quotaCancel = null; quotaTask = null; quotaAt = -Infinity
           state = { ...state, quotaError: null, quotaErrorProvider: '' }
         }
         if (gatewayChanged) { meter = new SessionMeter(); previews.clear(); usage.clear(); historyRow=null; state = { ...emptySnapshot(), selectedSession: state.selectedSession }; quotaAt = conversationAt = usageAt = -Infinity }
-        state = { ...state, baseURL: base, showQuota, quotaProvider, cards: showQuota ? state.cards : [] }
+        state = { ...state, baseURL: base, showQuota, quotaProvider, ignoredQuotaModels, cards: showQuota ? state.cards : [] }
         if (showQuota) quotaBase = base
         void focused(force).catch(() => {})
-        // Quota reads may wait for a vendor. Do not pause the speed sampler for them.
-        if (showQuota && !force && clock() - quotaAt >= 30_000) void quotas(base, false).catch(() => {})
+        // Resolve the focused model before starting any quota requests.
         try {
           const payload = await getJSON(base, '/v1/magpie/trace')
           const all=meter.ingest(payload,clock())
@@ -308,7 +318,8 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
         await restoreCurrentHistory(quotaBase)
       await quotaTask
       await quotas(quotaBase, true)
-    }
+    } else if (quotaBase && quotaBase === state.baseURL && clock() - quotaAt >= 30_000)
+      void quotas(quotaBase, false).catch(() => {})
     if (force && usageTask) await usageTask
     return panelSnapshot(state)
   }
