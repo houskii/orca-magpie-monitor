@@ -7,9 +7,9 @@
 - 额度默认跟随当前会话实际使用的供应商，也可手动固定来源或关闭。
 - 支持百分比窗口、分组额度、积分、余额和文本状态；多账号可查看均值及明细。
 - 兼容 Orca 的 journal、domain 会话存储。没有网关测速记录时，仍可显示已识别的 agent、模型和思考强度。
-- 原生 Antigravity 会话可读取本机运行时统计，不要求请求经过 Magpie。
+- 原生 Antigravity 会话可读取本机运行时统计，不要求请求经过 Magpie。切换会话时独立读取，其他会话的网关请求不会拖住原生测速。
 
-当前版本 **0.4.2**。适用于 macOS 12+、Orca **1.4.258+**。弹窗包含 Apple Silicon 与 Intel 通用二进制。已在 Orca 1.4.271 验证存储兼容。Antigravity 原生统计适配 ACP 1.5.2，并需要 worker 支持 `node:sqlite`。
+当前版本 **0.4.3**。适用于 macOS 12+、Orca **1.4.258+**。弹窗包含 Apple Silicon 与 Intel 通用二进制。已在 Orca 1.4.271 验证存储兼容。Antigravity 原生统计适配 ACP 1.5.2，并需要 worker 支持 `node:sqlite`。
 
 ## 安装
 
@@ -20,7 +20,7 @@ orca plugin install houskii/orca-magpie-monitor
 也可固定版本：
 
 ```sh
-orca plugin install houskii/orca-magpie-monitor@v0.4.2
+orca plugin install houskii/orca-magpie-monitor@v0.4.3
 ```
 
 首次安装时，Orca 会显示插件权限和来源。检查后，按 Orca 返回的命令完成授权；每个安装者使用自己机器上生成的授权信息。

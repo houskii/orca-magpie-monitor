@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "magpie-monitor",
   "name": "Magpie 用量与速度",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "读取 Magpie 或兼容网关的额度与会话 TPS、Token、缓存统计，支持 Antigravity 原生测速。",
   "engines": {
     "orca": ">=1.4.258"

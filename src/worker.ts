@@ -2,7 +2,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { emptySnapshot, type ConversationPreview, type FocusedConversation, type Session, type Snapshot } from './protocol'
 import { cchostSource, quotaSelection, gatewayBaseURL, parseCards, SessionMeter } from './metrics'
 import { readConversations } from './conversations'
-import { sessionLabel, statusSessionText } from './session-label'
+import { sessionLabel, statusSessionText, truncateStatusText } from './session-label'
 import { cachePercent, compactTokens, conversationAgentLabel, currentQuota, currentSession, liveRate, meanLabel, quotaLabel, quotaTone, quotaWindowName, quotaWindows, rate, resetTime, speedNote, statusSessions, speedTone, speedValue } from './presentation'
 import { readFocus, watchFocus } from './focus'
 import { createPopup, type MonitorPopup } from './popup'
@@ -27,6 +27,8 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   let conversationTask: Promise<void> | null = null, conversationAt = -Infinity
   let focusTask: Promise<void> | null = null, focusAt = -Infinity
   let historyRow: Session | null = null
+  let nativeTask: { key: string; task: Promise<void> } | null = null
+  let nativeKey = '', nativeAt = -Infinity
   let previews = new Map<string, ConversationPreview>()
   const popup = options.popup || createPopup(orca.log)
   const barCache = new Map<string, string>()
@@ -62,6 +64,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     }
     const card = binding.card
     const update = async (item: Parameters<typeof orca.host.call<'statusBar.update'>>[1]) => {
+      if (typeof item.text === 'string') item = { ...item, text: truncateStatusText(item.text, 64) }
       const json = JSON.stringify(item)
       if (barCache.get(item.id) === json) return
       try {
@@ -88,8 +91,9 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     for (let i = 0; i < 3; i++) {
       const s = sessions[i], id = i === 0 ? 'speed' : `speed${i + 1}`
       const speedError = s?.statsSource === 'antigravity-native' ? null : state.speedError
+      const suffix = s ? `${cchostSource(s.provider) ? ' · ' + cchostSource(s.provider) : ''} [Token ${compactTokens(s.totalTokens)}][缓存 ${cachePercent(s.cacheHitRate)}]` : ''
       await update({ id, icon: 'zap', visible: !!s || i === 0,
-        text: s ? `${statusSessionText(s)}${cchostSource(s.provider) ? ' · ' + cchostSource(s.provider) : ''} [Token ${compactTokens(s.totalTokens)}][缓存 ${cachePercent(s.cacheHitRate)}]` : focus ? `—T/s · 当前对话${focus.session ? '暂无测速数据' : '等待会话信息'}` : '—T/s · 等待当前会话',
+        text: s ? statusSessionText(s, 64 - suffix.length) + suffix : focus ? `—T/s · 当前对话${focus.session ? '暂无测速数据' : '等待会话信息'}` : '—T/s · 等待当前会话',
         tone: speedError ? 'warning' : s && s.averageTPS !== null ? speedTone(speedValue(s)) : 'neutral',
         tooltip: (`${focus ? '自动关联当前标签页' : state.focusError || '当前页面无可绑定的本机会话'}\n` + (speedError || (s ? `${sessionLabel(s)}\n${meanLabel(s)}：${rate(s.averageTPS)}\n${speedNote(s)}\n实时：${liveRate(s)}\n${s.model}\nToken：${s.totalTokens??'未提供'}（含缓存读写的累计输入输出）\n缓存命中：${cachePercent(s.cacheHitRate)}\n点击查看全部对话与速度。` : [focus?.title, conversationAgentLabel(focus), focus?.session ? '尚无匹配的测速记录。' : '', '点击查看全部对话与速度。'].filter(Boolean).join('\n')))).slice(0,256) })
     }
@@ -115,9 +119,33 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
         state = { ...state, focusedConversation: null, focusError: '暂未取得当前标签页，等待恢复自动关联' }
       }
       await publish()
+      // Local native counters must not wait behind another session's gateway calls.
+      if (state.checkedAt && state.focusedConversation?.agent === 'antigravity') void nativeUsage(false).catch(() => {})
       if(state.checkedAt&&state.focusedConversation?.session&&(!currentSession(state)||state.focusedConversation.agent==='antigravity'&&clock()-usageAt>=5000))void sessionUsage(state.baseURL,false).catch(()=>{})
     })().finally(() => { focusTask = null })
     return focusTask
+  }
+  function nativeUsage(force: boolean): Promise<void> {
+    const focus = state.focusedConversation, current = currentSession(state)
+    if (focus?.agent !== 'antigravity' || !focus.session || current && current.statsSource !== 'antigravity-native') return Promise.resolve()
+    const key = JSON.stringify([focus.orcaSession, focus.session])
+    if (nativeTask?.key === key) return nativeTask.task
+    if (!force && nativeKey === key && clock() - nativeAt < 5000) return Promise.resolve()
+    nativeKey = key; nativeAt = clock()
+    const task = (async () => {
+      try {
+        const native = await (options.native || readAntigravitySession)(focus, clock())
+        if (stopped || state.focusedConversation?.orcaSession !== focus.orcaSession || state.focusedConversation.session !== focus.session) return
+        if (native) {
+          historyRow = native
+          state = { ...state, sessions: [native, ...state.sessions.filter(s => s.key !== native.key)].slice(0, MAX_SESSIONS) }
+          attachPreviews()
+          await publish()
+        }
+      } catch { /* Keep previous native measurements when a local read is temporarily unavailable. */ }
+    })().finally(() => { if (nativeTask?.task === task) nativeTask = null })
+    nativeTask = { key, task }
+    return task
   }
   async function restoreCurrentHistory(base:string):Promise<void>{
     const focus=state.focusedConversation
@@ -125,17 +153,10 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     const current=currentSession(state)
     if(current&&current.statsSource!=='antigravity-native')return
     if(focus.agent==='antigravity'){
-      try{
-        const native=await(options.native||readAntigravitySession)(focus,clock())
-        if(stopped||state.baseURL!==base||state.focusedConversation?.orcaSession!==focus.orcaSession||state.focusedConversation.session!==focus.session)return
-        if(native){
-          historyRow=native
-          state={...state,sessions:[native,...state.sessions.filter(s=>s.key!==native.key)].slice(0,MAX_SESSIONS)}
-          return
-        }
-      }catch{ /* Keep a previously measured native summary; unsupported formats do not become zero speed. */ }
-      if(current)return
+      await nativeUsage(false)
+      if (currentSession(state)) return
     }
+    if (stopped || state.baseURL !== base || state.focusedConversation?.orcaSession !== focus.orcaSession || state.focusedConversation.session !== focus.session) return
     const q=new URLSearchParams({period:'all',q:focus.session,via:'through',limit:'1'})
     try{
       const data=await getJSON(base,'/v1/magpie/usage/requests?'+q.toString()) as Record<string,unknown>
@@ -312,7 +333,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     })()
     try { await pending } finally { pending = null }
     if (focusTask) await focusTask
-    if (state.focusedConversation?.agent==='antigravity'&&(force||clock()-usageAt>=5000))await sessionUsage(state.baseURL,force)
+    if (state.focusedConversation?.agent === 'antigravity') await nativeUsage(force)
     if (force && quotaBase && quotaBase === state.baseURL) {
       if (state.quotaProvider === 'auto' && state.focusedConversation?.session && !currentSession(state))
         await restoreCurrentHistory(quotaBase)
@@ -320,7 +341,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
       await quotas(quotaBase, true)
     } else if (quotaBase && quotaBase === state.baseURL && clock() - quotaAt >= 30_000)
       void quotas(quotaBase, false).catch(() => {})
-    if (force && usageTask) await usageTask
+    if (force && usageTask && currentSession(state)?.statsSource !== 'antigravity-native') await usageTask
     return panelSnapshot(state)
   }
   orca.panels.handle('monitor.get', async () => {

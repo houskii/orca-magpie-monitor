@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- Read focused Antigravity counters independently from pending gateway summaries, so switching sessions does not wait for unrelated requests.
+- Keep complete status bar labels within Orca's 64-character limit, including source, Token and cache details. Shorten titles without splitting emoji.
+
 ## 0.4.2
 
 - Skip account quota checks by configured model families or wildcard rules, independently of the gateway provider.

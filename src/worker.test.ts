@@ -428,6 +428,70 @@ test('native Antigravity counters refresh without Magpie requests or an availabl
   await worker.deactivate()
 })
 
+test('switching to native Antigravity does not wait for another sessions pending gateway summary', async () => {
+  let stop: (() => void) | undefined
+  let focus: FocusedConversation = { orcaSession: 'gateway-orca', session: 'gateway-thread', workspace: 'workspace', title: '网关会话', agent: 'codex' }
+  let resolveUsage: ((r: Response) => void) | undefined
+  let nativeReads = 0
+  const seed = sampleSnapshot().sessions[0]
+  const send: typeof fetch = async input => {
+    if (String(input).includes('/trace')) return Response.json({ routes: [rawRoute(1, 'gateway-thread')] })
+    return new Promise<Response>(resolve => { resolveUsage = resolve })
+  }
+  const module = { default(orca: OrcaWorkerApi) { stop = activateMonitor(orca, {
+    send, background: false, conversations: async () => [], focus: async () => focus,
+    native: async current => {
+      nativeReads++
+      return { ...seed, key: 'native-focused', session: current.session, agent: 'antigravity',
+        requestedModel: current.model, model: current.model!, averageTPS: 67.4, statsSource: 'antigravity-native',
+        conversation: { ...current, prompt: '', updatedAt: instant } }
+    },
+  }) }, deactivate() { stop?.() } }
+  const host = mockHost({ capabilities: ['settings:own', 'storage:own'], settings: { showQuota: false, ignoredQuotaModels: 'gemini' } })
+  const worker = await mountWorker(module, { host, commands: ['magpie.refresh', 'magpie.sessions'] })
+  await worker.request('monitor.get')
+  for (let i = 0; !resolveUsage && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 1))
+  assert.ok(resolveUsage)
+  focus = { orcaSession: 'native-orca', session: 'native-thread', workspace: 'workspace', title: '原生会话', agent: 'antigravity', model: 'gemini-4-neon' }
+  const switched = worker.request('monitor.refresh')
+  for (let i = 0; !nativeReads && i < 50; i++) await new Promise(resolve => setTimeout(resolve, 1))
+  const readsBeforeGatewayCompleted = nativeReads
+  resolveUsage!(Response.json({ total: 0, rows: [] }))
+  const result = await switched
+  await worker.deactivate()
+  assert.ok(readsBeforeGatewayCompleted > 0, 'native counters must be read before the gateway summary completes')
+  assert.ok(result.sessions.some(s => s.session === 'native-thread' && s.averageTPS === 67.4))
+})
+
+test('complete status bar labels fit the host limit with native metrics, emoji titles and source labels', async () => {
+  let stop: (() => void) | undefined
+  const seed = sampleSnapshot().sessions[0]
+  let source = 'antigravity'
+  const focus = { orcaSession: 'native-orca', session: 'native-thread', workspace: 'workspace', title: '🧪'.repeat(30), agent: 'antigravity', model: 'gemini-4-neon' }
+  const module = { default(orca: OrcaWorkerApi) { stop = activateMonitor(orca, {
+    send: withUsage(async input => Response.json(String(input).includes('/trace') ? { routes: [] } : { data: [] })),
+    background: false, conversations: async () => [], focus: async () => focus,
+    native: async () => ({ ...seed, key: 'native-focused', session: focus.session, agent: 'antigravity', requestedModel: focus.model,
+      model: focus.model, provider: source, statsSource: 'antigravity-native', averageTPS: 167.4, totalTokens: 21946042, cacheHitRate: .942,
+      conversation: { ...focus, prompt: '', updatedAt: instant } }),
+  }) }, deactivate() { stop?.() } }
+  const host = mockHost({ capabilities: ['settings:own', 'storage:own'], settings: { showQuota: false }, results: {
+    'statusBar.update': (value: unknown) => {
+      if ((value as { text: string }).text.length > 64) throw hostError('invalid_params', 'status text exceeds 64 characters')
+      return null
+    },
+  } })
+  const worker = await mountWorker(module, { host, commands: ['magpie.refresh', 'magpie.sessions'] })
+  await worker.request('monitor.refresh')
+  source = 'gemini-cchost'
+  await worker.request('monitor.refresh')
+  const updates = host.callsOf('statusBar.update') as { id: string; text: string }[]
+  await worker.deactivate()
+  assert.ok(updates.every(s => s.text.length <= 64))
+  assert.ok(updates.some(s => s.id === 'speed' && s.text.includes('167.4T/s') && s.text.includes('Token 21.9M') && s.text.includes('94.2%')))
+  assert.equal(worker.logs.some(line => String(line).includes('invalid_params')), false)
+})
+
 test('an older selected conversation can load its summary even after leaving the trace window', async () => {
   let stop:(()=>void)|undefined
   const send:typeof fetch=async input=>{
