@@ -1,9 +1,9 @@
 import { atom, Badge, Button, Callout, Card, Collapsible, Heading, KeyValue, plugin,
   read, RelativeTime, Row, Select, set, Stack, Switch, Text, type PanelContext } from 'orca'
 import { emptySnapshot, type Snapshot } from './protocol'
-import { quotaSelection } from './metrics'
+import { cchostSource, quotaSelection } from './metrics'
 import { excerpt, sessionLabel } from './session-label'
-import { activityLabel, cachePercent, compactTokens, conversationAgentLabel, currentSession, liveRate, meanLabel, orcaSession, quotaTone, quotaWindowName, quotaWindows, ranked, rate, resetTime, speedNote, speedTone, speedValue, startTime } from './presentation'
+import { activityLabel, cachePercent, compactTokens, conversationAgentLabel, currentQuota, currentSession, liveRate, meanLabel, orcaSession, quotaTone, quotaWindowName, quotaWindows, ranked, remainingQuota, rate, resetTime, speedNote, speedTone, speedValue, startTime } from './presentation'
 const snapshot = atom<Snapshot>(emptySnapshot())
 const source = atom('session-source-v2', 'all', { persist: 'plugin' })
 const busy = atom(false), failure = atom('')
@@ -28,32 +28,33 @@ export function setup(ctx: PanelContext): void {
   void plugin.request('monitor.get', undefined, { signal: ctx.signal }).then(value => set(snapshot, value)).catch(() => set(failure, '尚未连接 Magpie 插件进程'))
 }
 export default function Panel() {
-  const data = read(snapshot), binding = quotaSelection(data.cards, data.quotaProvider)
+  const data = read(snapshot), binding = currentQuota(data), current = currentSession(data)
   const quotaCards = binding.card?.averaged ? [binding.card, ...binding.cards] : binding.cards
-  const sources = [{ value: 'auto', label: '自动选择网关提供的来源' }, ...new Map(data.cards.filter(c => c.provider !== 'auto').map(c => [c.provider, { value: c.provider, label: `${quotaSelection(data.cards, c.provider).label} (${c.provider})` }])).values()]
+  const sources = [{ value: 'auto', label: '自动 · 跟随当前会话' }, ...new Map(data.cards.filter(c => c.provider !== 'auto').map(c => [c.provider, { value: c.provider, label: `${quotaSelection(data.cards, c.provider).label} (${c.provider})` }])).values()]
   if (!sources.some(s => s.value === data.quotaProvider)) sources.push({ value: data.quotaProvider, label: binding.label })
   const sessions = ranked(data.sessions.filter(s => read(source) !== 'orca' || orcaSession(s)))
   return <Stack gap="md">
     <Row justify="between"><Heading>Magpie</Heading><Button icon="refresh" size="sm" variant="ghost" disabled={read(busy)} onPress={refresh}>刷新</Button></Row>
-    {(read(failure) || data.speedError || data.showQuota && data.quotaError) && <Callout tone="warning" title="数据暂未更新"><Text>{read(failure) || data.speedError || data.quotaError}</Text></Callout>}
+    {(read(failure) || data.speedError || data.showQuota && binding.error) && <Callout tone="warning" title="数据暂未更新"><Text>{read(failure) || data.speedError || binding.error}</Text></Callout>}
     <Switch label="显示网关账号额度" checked={data.showQuota} disabled={read(busy)} onChange={enabled => { void configureQuota({ enabled }) }} />
     {data.showQuota && <Select label="额度来源" value={data.quotaProvider} options={sources} disabled={read(busy)} onChange={provider => { void configureQuota({ provider }) }} />}
     <Card title="当前会话自动绑定"><Stack gap="xs">
       <Text>{data.focusedConversation ? data.focusedConversation.title || '当前对话' : '当前页面无可绑定的本机会话'}</Text>
       {conversationAgentLabel(data.focusedConversation) && <Text muted size="xs">{conversationAgentLabel(data.focusedConversation)}</Text>}
-      <Text muted size="xs">{data.focusError || (data.focusedConversation ? currentSession(data) ? currentSession(data)?.statsSource==='antigravity-native' ? '已关联 Antigravity 原生测速；每个请求结束后更新均速。' : '已关联网关；底栏只显示当前对话，空闲时保留均速。' : data.focusedConversation.session ? '当前对话尚无测速数据，等待请求记录。' : '等待当前对话建立上游会话。' : '底栏等待当前会话，不替换成其他对话。')}</Text>
+      {current && cchostSource(current.provider) && <Text muted size="xs">实际来源 {cchostSource(current.provider)}</Text>}
+      <Text muted size="xs">{data.focusError || (data.focusedConversation ? current ? current.statsSource==='antigravity-native' ? '已关联 Antigravity 原生测速；每个请求结束后更新均速。' : '已关联网关；底栏只显示当前对话，空闲时保留均速。' : data.focusedConversation.session ? '当前对话尚无测速数据，等待请求记录。' : '等待当前对话建立上游会话。' : '底栏等待当前会话，不替换成其他对话。')}</Text>
     </Stack></Card>
     {data.showQuota && <Stack gap="sm">
       <Text muted size="xs">{binding.message}</Text>
-      {quotaCards.map(card => <Card title={card.averaged ? card.name : `${card.name} 账号额度`} description={card.averaged ? '同名窗口按账号等权平均，缺失或失败的读数不计入。' : '同一账号的所有对话共享。'}><Stack gap="sm">
+      {quotaCards.map(card => <Card title={card.averaged ? card.name : `${binding.cards.length === 1 ? binding.label : card.name} 账号额度`} description={card.averaged ? '同名窗口按账号等权平均，缺失或失败的读数不计入。' : '同一账号的所有对话共享。'}><Stack gap="sm">
         {card.error && <Text tone="warning" size="xs">{card.error}</Text>}
         {quotaWindows(card).map(w => <Stack gap="xs">
-          <Row justify="between"><Text weight="medium">{quotaWindowName(w.name, w.pool)}</Text><Badge tone={quotaTone(w.remaining)}>{w.text ? w.display || '未提供' : w.remaining === null ? '未提供' : `剩余 ${w.remaining}%`}</Badge></Row>
+          <Row justify="between"><Text weight="medium">{quotaWindowName(w.name, w.pool)}</Text><Badge tone={quotaTone(w.remaining)}>{w.text ? w.display || '未提供' : w.remaining === null ? '未提供' : `剩余 ${remainingQuota(w.remaining)}`}</Badge></Row>
           {!w.text && w.display && <Text muted size="xs">{w.display}</Text>}
           {w.resetsAt && <Text muted size="xs">{card.averaged ? '最早重置：' : '下次重置：'}{resetTime(w.resetsAt)}</Text>}
         </Stack>)}
         {!quotaWindows(card).length && <Text muted>尚无额度读数</Text>}
-        {card.readAt && <Text muted size="xs">{data.quotaError ? '上次成功读数' : '额度读取于'} <RelativeTime at={Date.parse(card.readAt)} /></Text>}
+        {card.readAt && <Text muted size="xs">{binding.error ? '上次成功读数' : '额度读取于'} <RelativeTime at={Date.parse(card.readAt)} /></Text>}
       </Stack></Card>)}
     </Stack>}
     <Row justify="between"><Heading level={3}>全部对话</Heading><Badge>{sessions.length} 个</Badge></Row>
@@ -67,7 +68,7 @@ export default function Panel() {
       <Heading level={3}>{sessionLabel(s)}</Heading>
       <Row gap="sm" wrap><Badge tone={s.averageTPS === null ? 'neutral' : speedTone(speedValue(s))}>{meanLabel(s)} {rate(s.averageTPS)}</Badge>
         <Text muted size="xs">实时 {data.speedError && s.statsSource!=='antigravity-native' ? '0T/s' : liveRate(s)}</Text></Row>
-      <Text muted size="xs">{s.model} · {data.speedError ? '采样已暂停' : activityLabel(s)}</Text>
+      <Text muted size="xs">{[s.model, cchostSource(s.provider), data.speedError ? '采样已暂停' : activityLabel(s)].filter(Boolean).join(' · ')}</Text>
       <Text muted size="xs">累计 Token {compactTokens(s.totalTokens)} · 缓存命中 {cachePercent(s.cacheHitRate)}</Text>
       <Text muted size="xs">{s.statsSource==='antigravity-native'?'原生首个请求':'Magpie 首个请求'}：{startTime(s.startedAt)}</Text>
       {s.statsError&&<Text tone="warning" size="xs">{s.statsError}</Text>}

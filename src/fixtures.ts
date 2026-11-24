@@ -31,3 +31,17 @@ export function activeSnapshot(): Snapshot {
       prompt: '正在生成回复，可以在这里查看均速和实时速度。', updatedAt: instant, running: true } }))
   return data
 }
+
+export function cchostSnapshot(source: 'claude' | 'gemini'): Snapshot {
+  const state = sampleSnapshot(), model = 'claude-sonnet-5-5'
+  const sources = ['claude', 'gemini'] as const
+  state.sessions = sources.map((kind, i) => ({
+    ...state.sessions[i], session: kind, model, provider: kind + '-cchost', quotaProvider: kind + '-cchost',
+  }))
+  state.focusedConversation = { session: source, orcaSession: source, title: 'CC Host 会话', workspace: '', agent: 'claude', model }
+  state.cards = parseCards({ data: [
+    { provider: 'claude-cchost', windows: [{ name: '5 hours', used: 34, resetsAt: '2026-11-13T13:20:00Z' }] },
+    { provider: 'gemini-cchost', balance: '5 hours used 12.1% · 5 hours reset 2026-11-13T14:00:00Z · 7 days used 5%' },
+  ] })
+  return state
+}

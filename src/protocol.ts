@@ -14,7 +14,7 @@ export type Session = {
   conversation?: ConversationPreview;
 }
 export type Snapshot = {
-  checkedAt: number; cards: QuotaCard[]; sessions: Session[]; quotaError: string | null;
+  checkedAt: number; cards: QuotaCard[]; sessions: Session[]; quotaError: string | null; quotaErrorProvider?: string;
   showQuota: boolean; quotaProvider: string;
   speedError: string | null; conversationError: string | null; selectedSession: string; baseURL: string;
   omittedSessions?:number;

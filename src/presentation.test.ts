@@ -1,7 +1,8 @@
 import { assert, test } from 'orca/testing'
 import { SessionMeter } from './metrics'
-import { instant, rawRoute, sampleSnapshot } from './fixtures'
-import { cachePercent, compactTokens, duration, isRunning, liveRate, meanLabel, quotaTone, rate, running, speedNote, speedTone, speedValue } from './presentation'
+import { cchostSnapshot, instant, rawRoute, sampleSnapshot } from './fixtures'
+import { cachePercent, compactTokens, currentQuota, duration, isRunning, liveRate, meanLabel, quotaTone, rate, running, speedNote, speedTone, speedValue } from './presentation'
+import { panelSnapshot } from './bounds'
 import { popupData } from './popup'
 import { parseCards } from './metrics'
 
@@ -76,4 +77,21 @@ test('popup shows the selected source and all its accounts without invented 5h o
   assert.deepEqual(popupData(data).quotas, [])
   assert.equal(popupData(data).quotaError, null)
   assert.equal(popupData(data).sessions.length, data.sessions.length)
+})
+
+test('the same Claude model uses the focused account source and its own reset time', () => {
+  const state = cchostSnapshot('gemini')
+  const snapshot = panelSnapshot(state)
+  assert.equal(currentQuota(snapshot).provider, 'gemini-cchost')
+  assert.equal(currentQuota(snapshot).card?.windows[0].resetsAt, '2026-11-13T14:00:00Z')
+  assert.deepEqual(popupData(snapshot).quotas.map(q => q.value), ['剩余 87.9%', '剩余 95%'])
+  assert.ok(popupData(snapshot).quotas.every(q => q.name.startsWith('cchost · Gemini') && q.brand === 'cchost'))
+  state.focusedConversation!.session = 'claude'
+  assert.equal(currentQuota(state).provider, 'claude-cchost')
+  assert.equal(popupData(state).quotas[0].value, '剩余 66%')
+  state.focusedConversation!.session = 'unseen'
+  assert.equal(currentQuota(state).provider, '')
+  assert.deepEqual(popupData(state).quotas, [])
+  state.quotaProvider = 'gemini-cchost'
+  assert.equal(currentQuota(state).provider, 'gemini-cchost')
 })

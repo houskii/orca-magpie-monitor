@@ -204,7 +204,7 @@ test('status bar shows only the current mean while the popup still opens all ses
   let stop: (() => void) | undefined, at = instant, tick = 0, shown: unknown
   const speeds = [10,40,100,200]
   const send: typeof fetch = async input => Response.json(String(input).includes('/trace') ? {
-    routes: speeds.map((v,i) => rawRoute(i+1,`chat-${i}`,{done:false,estTok:10+tick*v}))
+    routes: speeds.map((v,i) => rawRoute(i+1,`chat-${i}`,{provider:'example-provider',done:false,estTok:10+tick*v}))
   } : {data:[{provider:'example-provider',windows:[{name:'5 hours',used:60,resetsAt:'2026-11-13T21:00:00Z'},{name:'7 days',used:85,resetsAt:'2026-11-15T03:00:00Z'}]}]})
   const module = {default(orca:OrcaWorkerApi) {stop=activateMonitor(orca,{send:withUsage(send),clock:()=>at,background:false,
     conversations:async()=>[],focus:async()=>({orcaSession:'current',session:'chat-3',workspace:'ws',title:'当前'}),popup:{update(){},async show(data){shown=popupData(data)},close(){}}})},deactivate(){stop?.()}}
@@ -224,6 +224,42 @@ test('status bar shows only the current mean while the popup still opens all ses
   assert.deepEqual(worker.refusals,[])
   await worker.deactivate()
 })
+test('following the current cchost session switches both the status bar and refresh target', async () => {
+  let stop: (() => void) | undefined
+  let session = 'gemini'
+  const model = 'claude-sonnet-5-5', posts: string[] = [], sources = ['claude', 'gemini']
+  const cards = sources.map((s, i) => ({ provider: s + '-cchost', windows: [{ name: '5 hours', used: 20 + i * 50 }] }))
+  const send: typeof fetch = async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith('/trace')) return Response.json({
+      routes: sources.map((s, i) => rawRoute(i + 1, s, { model, provider: s + '-cchost' })),
+    })
+    if (init?.method === 'POST') {
+      const provider = url.searchParams.get('provider') || ''
+      posts.push(provider)
+      return Response.json({ data: cards.filter(c => c.provider === provider) })
+    }
+    return Response.json({ data: cards })
+  }
+  const module = { default(orca: OrcaWorkerApi) {
+    stop = activateMonitor(orca, { send: withUsage(send), background: false, conversations: async () => [],
+      focus: async () => ({ session, orcaSession: session, workspace: '', title: session, model }) })
+  }, deactivate() { stop?.() } }
+  const host = mockHost({ capabilities: ['settings:own', 'storage:own'] })
+  const worker = await mountWorker(module, { host, commands: ['magpie.refresh', 'magpie.sessions'] })
+  try {
+    const gemini = await worker.request('monitor.refresh')
+    assert.equal(popupData(gemini).quotas[0]?.value, '剩余 30%')
+    session = 'claude'
+    const claude = await worker.request('monitor.refresh')
+    assert.equal(popupData(claude).quotas[0]?.value, '剩余 80%')
+    assert.deepEqual(posts, ['gemini-cchost', 'claude-cchost'])
+    const updates = host.callsOf('statusBar.update').map(x => JSON.stringify(x))
+    assert.ok(updates.some(x => x.includes('cchost · Gemini 5h 余30%')))
+    assert.ok(updates.some(x => x.includes('cchost · Claude 5h 余80%')))
+  } finally { await worker.deactivate() }
+})
+
 test('a full-page view without a status bar cannot stop metric delivery', async () => {
   let stop:(()=>void)|undefined
   const send:typeof fetch=async input=>Response.json(String(input).includes('/trace') ? {routes:[rawRoute(1)]}

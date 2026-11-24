@@ -1,5 +1,7 @@
 Claude, GPT / OpenAI and DeepSeek SVG paths are adapted from Magpie 0.1.3995, internal/gui/assets/icons (based on lobehub/icons). Fixed brand colors were replaced with currentColor. Brand names and marks belong to their respective owners.
 
+The CC Host logo is from the official [CC Host site](https://cchost.ai/brand-logo.svg). It identifies the source of an account's quota.
+
 Magpie license:
 
 MIT License

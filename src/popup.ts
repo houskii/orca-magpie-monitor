@@ -1,23 +1,26 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import type { Snapshot } from './protocol'
-import { quotaSelection } from './metrics'
+import { cchostSource } from './metrics'
 import { excerpt, sessionLabel } from './session-label'
 import { modelIcon } from './model-icon'
-import { activityLabel, currentSession, isRunning, liveRate, meanLabel, quotaTone, quotaWindowName, quotaWindows, ranked, rate, resetTime, speedNote, speedTone, speedValue, startTime } from './presentation'
+import { activityLabel, currentQuota, currentSession, isRunning, liveRate, meanLabel, quotaTone, quotaWindowName, quotaWindows, ranked, remainingQuota, rate, resetTime, speedNote, speedTone, speedValue, startTime } from './presentation'
 
 export function popupData(state: Snapshot) {
-  const binding = quotaSelection(state.cards, state.quotaProvider)
+  const binding = currentQuota(state)
   const quotaCards = binding.card?.averaged ? [binding.card, ...binding.cards] : binding.cards
   const current = currentSession(state)
-  return { error: state.speedError, quotaError: state.showQuota ? state.quotaError : null, checkedAt: state.checkedAt,
+  return { error: state.speedError, quotaError: state.showQuota ? binding.error : null, checkedAt: state.checkedAt,
+    quotaNote: state.showQuota && !binding.card && !binding.cards.length ? binding.message : '',
     quotas: state.showQuota ? quotaCards.flatMap(card => quotaWindows(card).map(w => ({
       name: `${card.averaged ? binding.label + ' 均值' : binding.cards.length > 1 ? card.name : binding.label} ${quotaWindowName(w.name, w.pool)}`,
-      value: w.text ? w.display || '未提供' : w.remaining === null ? '未提供' : `剩余 ${w.remaining}%`,
+      value: w.text ? w.display || '未提供' : w.remaining === null ? '未提供' : `剩余 ${remainingQuota(w.remaining)}`,
+      brand: cchostSource(card.provider) ? 'cchost' : '',
       remaining: w.remaining, reset: w.resetsAt ? resetTime(w.resetsAt) : '', tone: quotaTone(w.remaining),
       detail: card.averaged ? w.display : '', resetLabel: card.averaged ? '最早重置' : '重置',
     }))) : [], sessions: ranked(state.sessions).map(s => ({
       title: sessionLabel(s), prompt: excerpt(s.conversation?.prompt || '', 100), model: s.model, icon: modelIcon(s.model),
+      source: cchostSource(s.provider) || '',
       active: isRunning(s), activity: activityLabel(s), current: s.key === current?.key,
       speed: rate(s.averageTPS), live: liveRate(s), speedLabel: meanLabel(s), speedNote: speedNote(s),
       startedLabel:s.statsSource==='antigravity-native'?'原生首个请求':'Magpie 首个请求',

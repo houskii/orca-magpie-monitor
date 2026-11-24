@@ -1,9 +1,9 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import { emptySnapshot, type ConversationPreview, type FocusedConversation, type Session, type Snapshot } from './protocol'
-import { quotaSelection, gatewayBaseURL, parseCards, SessionMeter } from './metrics'
+import { cchostSource, quotaSelection, gatewayBaseURL, parseCards, SessionMeter } from './metrics'
 import { readConversations } from './conversations'
 import { sessionLabel, statusSessionText } from './session-label'
-import { cachePercent, compactTokens, conversationAgentLabel, currentSession, liveRate, meanLabel, quotaLabel, quotaTone, quotaWindowName, quotaWindows, rate, resetTime, speedNote, statusSessions, speedTone, speedValue } from './presentation'
+import { cachePercent, compactTokens, conversationAgentLabel, currentQuota, currentSession, liveRate, meanLabel, quotaLabel, quotaTone, quotaWindowName, quotaWindows, rate, resetTime, speedNote, statusSessions, speedTone, speedValue } from './presentation'
 import { readFocus, watchFocus } from './focus'
 import { createPopup, type MonitorPopup } from './popup'
 import { attachUsage, readSessionUsage, usageKey, type SessionUsage } from './usage-source'
@@ -51,7 +51,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   }
   async function publish(): Promise<void> {
     if (stopped) return
-    const binding = quotaSelection(state.cards, state.quotaProvider), card = binding.card
+    const binding = currentQuota(state), card = binding.card
     const update = async (item: Parameters<typeof orca.host.call<'statusBar.update'>>[1]) => {
       const json = JSON.stringify(item)
       if (barCache.get(item.id) === json) return
@@ -71,16 +71,16 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
     for (const [i, id] of ['quota5h', 'quota7d'].entries()) {
       const w = primary[i], label = w ? quotaWindowName(w.name, w.pool) + (card?.averaged ? ' 均值' : '') : '额度'
       await update({ id, icon: 'gauge', visible: state.showQuota && (!!w || i === 0),
-        text: `${i === 0 ? binding.label + ' ' : ''}${label} ${w ? quotaLabel(w) : binding.cards.length > 1 ? `${binding.cards.length} 个账号 · 见面板` : '未取得'}${w?.resetsAt ? ' ↻' + resetTime(w.resetsAt, true) : ''}${state.quotaError ? ' · 待更新' : ''}`,
+        text: binding.provider ? `${i === 0 ? binding.label + ' ' : ''}${label} ${w ? quotaLabel(w) : binding.cards.length > 1 ? `${binding.cards.length} 个账号 · 见面板` : '未取得'}${w?.resetsAt ? ' ↻' + resetTime(w.resetsAt, true) : ''}${binding.error ? ' · 待更新' : ''}` : '额度 · 等待来源',
         tone: quotaTone(w?.remaining ?? null),
-        tooltip: `${label} ${quotaLabel(w)}${card?.averaged && w ? `\n${w.samples}/${binding.cards.length} 个账号参与平均` : ''}${w?.resetsAt ? (card?.averaged ? '\n最早重置：' : '\n下次重置：') + resetTime(w.resetsAt) : ''}\n${binding.message}${state.quotaError ? '\n' + state.quotaError : ''}\n点击刷新 ${binding.label}。` })
+        tooltip: `${label} ${quotaLabel(w)}${card?.averaged && w ? `\n${w.samples}/${binding.cards.length} 个账号参与平均` : ''}${w?.resetsAt ? (card?.averaged ? '\n最早重置：' : '\n下次重置：') + resetTime(w.resetsAt) : ''}\n${binding.message}${binding.error ? '\n' + binding.error : ''}${binding.provider ? '\n点击刷新 ' + binding.label + '。' : ''}` })
     }
     const sessions = statusSessions(state), focus = state.focusedConversation
     for (let i = 0; i < 3; i++) {
       const s = sessions[i], id = i === 0 ? 'speed' : `speed${i + 1}`
       const speedError = s?.statsSource === 'antigravity-native' ? null : state.speedError
       await update({ id, icon: 'zap', visible: !!s || i === 0,
-        text: s ? `${statusSessionText(s)} [Token ${compactTokens(s.totalTokens)}][缓存 ${cachePercent(s.cacheHitRate)}]` : focus ? `—T/s · 当前对话${focus.session ? '暂无测速数据' : '等待会话信息'}` : '—T/s · 等待当前会话',
+        text: s ? `${statusSessionText(s)}${cchostSource(s.provider) ? ' · ' + cchostSource(s.provider) : ''} [Token ${compactTokens(s.totalTokens)}][缓存 ${cachePercent(s.cacheHitRate)}]` : focus ? `—T/s · 当前对话${focus.session ? '暂无测速数据' : '等待会话信息'}` : '—T/s · 等待当前会话',
         tone: speedError ? 'warning' : s && s.averageTPS !== null ? speedTone(speedValue(s)) : 'neutral',
         tooltip: (`${focus ? '自动关联当前标签页' : state.focusError || '当前页面无可绑定的本机会话'}\n` + (speedError || (s ? `${sessionLabel(s)}\n${meanLabel(s)}：${rate(s.averageTPS)}\n${speedNote(s)}\n实时：${liveRate(s)}\n${s.model}\nToken：${s.totalTokens??'未提供'}（含缓存读写的累计输入输出）\n缓存命中：${cachePercent(s.cacheHitRate)}\n点击查看全部对话与速度。` : [focus?.title, conversationAgentLabel(focus), focus?.session ? '尚无匹配的测速记录。' : '', '点击查看全部对话与速度。'].filter(Boolean).join('\n')))).slice(0,256) })
     }
@@ -133,7 +133,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
       const row=(Array.isArray(data.rows)?data.rows[0]:null) as Record<string,unknown>|null
       if(!row||row.session!==focus.session||typeof row.agent!=='string'||!row.agent)return
       const stats=await readSessionUsage(path=>getJSON(base,path),{agent:row.agent,session:focus.session},clock())
-      if(stopped||state.baseURL!==base||state.focusedConversation?.orcaSession!==focus.orcaSession)return
+      if(stopped||state.baseURL!==base||state.focusedConversation?.orcaSession!==focus.orcaSession||state.focusedConversation.session!==focus.session)return
       const seed=new SessionMeter().ingest({routes:[{id:'focus-summary',agent:row.agent,session:focus.session,
         model:row.req||row.model,provider:row.provider,tries:[{model:row.model}],time:row.t,done:true}]},clock())[0]
       historyRow={...seed,key:'history:'+usageKey(seed),conversation:{session:focus.session,orcaSession:focus.orcaSession,
@@ -209,16 +209,16 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   function quotas(base: string, force: boolean): Promise<void> {
     if (!state.showQuota) return Promise.resolve()
     if (quotaTask) return quotaTask
-    const revision = quotaRevision, provider = state.quotaProvider, cancel = new AbortController()
+    const revision = quotaRevision, cancel = new AbortController()
     quotaCancel = cancel
     const current = () => !stopped && state.baseURL === base && state.showQuota && quotaRevision === revision
-    const label = quotaSelection(state.cards, provider).label
     quotaAt = clock()
     const task = (async () => {
       function accept(payload: unknown, partial = false, target?: string): void {
         if (!current()) return
         const parsed = parseCards(payload)
-        const selected = target || quotaSelection(parsed, provider).provider
+        const selected = target ?? currentQuota({ ...state, cards: parsed }).provider
+        if (!selected && !state.focusedConversation && !parsed.length) throw new Error('quota unavailable')
         const matches = parsed.filter(c => c.provider === selected)
         function replaceSelected(replacements: typeof parsed): typeof parsed {
           let inserted = false
@@ -230,27 +230,32 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
           if (!inserted) result.push(...replacements)
           return result
         }
-        if (!matches.length || matches.every(c => c.error)) {
+        if (selected && (!matches.length || matches.every(c => c.error))) {
           const kept = state.cards.filter(c => c.provider === selected && !c.error)
-          state = { ...state, cards: !selected ? state.cards : replaceSelected(kept.length ? kept : matches) }
-          throw new Error('quota unavailable')
+          state = { ...state, cards: replaceSelected(kept.length ? kept : matches) }
+          if (partial || matches.length) throw new Error('quota unavailable')
+        } else {
+          state = { ...state, cards: partial ? replaceSelected(matches) : parsed }
         }
-        state = { ...state, cards: partial ? replaceSelected(matches) : parsed,
-          quotaError: matches.some(c => c.error) ? `${quotaSelection(parsed, selected).label} 部分账号额度暂不可用。` : null }
+        if (!partial || currentQuota(state).provider === selected) {
+          state = { ...state, quotaErrorProvider: selected,
+            quotaError: matches.some(c => c.error) ? `${quotaSelection(parsed, selected).label} 部分账号额度暂不可用。` : null }
+        }
       }
       try {
         // Show kept readings first; a vendor refresh must not blank usable quota data.
         accept(await getJSON(base, '/v1/magpie/quotas?kept=1', 'GET', 12_000, cancel.signal))
         await publish()
       } catch {
-        if (current()) state = { ...state, quotaError: `${label} 额度暂未更新，已有读数保留；请检查网关。` }
+        if (current()) state = { ...state, quotaErrorProvider: '', quotaError: '额度暂未更新，已有读数保留。请检查网关。' }
       }
-      const selected = quotaSelection(state.cards, provider).provider
+      const { provider: selected, label } = currentQuota(state)
       if (force && current() && selected) try {
         // Resolve auto mode before refreshing; never send a refresh-all request.
         accept(await getJSON(base, '/v1/magpie/quotas/refresh?provider=' + encodeURIComponent(selected), 'POST', 35_000, cancel.signal), true, selected)
       } catch {
-        if (current()) state = { ...state, quotaError: `${label} 刷新失败，保留上次成功读数。` }
+        if (current() && selected === currentQuota(state).provider)
+          state = { ...state, quotaErrorProvider: selected, quotaError: `${label} 刷新失败，保留上次成功读数。` }
       }
       if (current()) await publish()
     })().finally(() => { if (quotaTask === task) { quotaTask = null; quotaCancel = null } })
@@ -259,6 +264,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   }
   async function refresh(force = false): Promise<Snapshot> {
     if (pending) { await pending; if (!force) return state }
+    let quotaBase: string | undefined
     pending = (async () => {
       try {
         const settings = await orca.settings.get(), base = gatewayBaseURL(settings.baseURL)
@@ -272,13 +278,14 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
         const quotaProvider = typeof settings.quotaProvider === 'string' && settings.quotaProvider.trim() ? settings.quotaProvider.trim().slice(0, 256) : 'auto'
         if (gatewayChanged || state.showQuota !== showQuota || state.quotaProvider !== quotaProvider) {
           quotaRevision++; quotaCancel?.abort(); quotaCancel = null; quotaTask = null; quotaAt = -Infinity
-          state = { ...state, quotaError: null }
+          state = { ...state, quotaError: null, quotaErrorProvider: '' }
         }
         if (gatewayChanged) { meter = new SessionMeter(); previews.clear(); usage.clear(); historyRow=null; state = { ...emptySnapshot(), selectedSession: state.selectedSession }; quotaAt = conversationAt = usageAt = -Infinity }
         state = { ...state, baseURL: base, showQuota, quotaProvider, cards: showQuota ? state.cards : [] }
+        if (showQuota) quotaBase = base
         void focused(force).catch(() => {})
         // Quota reads may wait for a vendor. Do not pause the speed sampler for them.
-        if (showQuota && (force || clock() - quotaAt >= 30_000)) void quotas(base, force).catch(() => {})
+        if (showQuota && !force && clock() - quotaAt >= 30_000) void quotas(base, false).catch(() => {})
         try {
           const payload = await getJSON(base, '/v1/magpie/trace')
           const all=meter.ingest(payload,clock())
@@ -289,14 +296,19 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
           if(force||clock()-usageAt>=5000)void sessionUsage(base,force).catch(()=>{})
           if (force || clock() - conversationAt >= 1000) void conversations().catch(() => {})
         } catch { state = { ...state, speedError: '无法读取网关，会话速度已暂停更新', checkedAt: clock() } }
-      } catch { state = { ...state, checkedAt: clock(), speedError: '请检查网关地址和认证环境变量设置', quotaError: state.showQuota ? '无法连接网关' : null } }
+      } catch { state = { ...state, checkedAt: clock(), speedError: '请检查网关地址和认证环境变量设置', quotaErrorProvider: '', quotaError: state.showQuota ? '无法连接网关' : null } }
       await publish()
       return state
     })()
     try { await pending } finally { pending = null }
     if (focusTask) await focusTask
     if (state.focusedConversation?.agent==='antigravity'&&(force||clock()-usageAt>=5000))await sessionUsage(state.baseURL,force)
-    if (force && quotaTask) await quotaTask
+    if (force && quotaBase && quotaBase === state.baseURL) {
+      if (state.quotaProvider === 'auto' && state.focusedConversation?.session && !currentSession(state))
+        await restoreCurrentHistory(quotaBase)
+      await quotaTask
+      await quotas(quotaBase, true)
+    }
     if (force && usageTask) await usageTask
     return panelSnapshot(state)
   }

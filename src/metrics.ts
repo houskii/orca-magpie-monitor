@@ -1,4 +1,4 @@
-import type { QuotaCard, Session } from './protocol'
+import type { QuotaCard, QuotaWindow, Session } from './protocol'
 export type Route = {
   id: string; agent: string; session: string; subagent: string; folder: string; model: string; requestedModel: string; provider: string; quotaProvider: string;
   done: boolean; status: number; canceled: boolean; time: number; contentAt: number; estimatedTokens: number | null;
@@ -18,6 +18,28 @@ export function gatewayBaseURL(value: unknown): string {
     throw new Error('请使用本机 HTTP 网关或 HTTPS 网关地址；认证信息请通过环境变量提供')
   return url.origin + url.pathname.replace(/\/+$/, '')
 }
+// A balance expression can explicitly label a percentage as used and pair it
+// with a reset. Unlabelled percentages may instead mean remaining or credits.
+function balanceWindows(value: unknown, balance: string): QuotaWindow[] {
+  // Some Magpie versions only export the formatted balance on the gateway.
+  // Accept just the labels and syntax of the explicit balance expression.
+  const parts = Array.isArray(value) && value.length ? value.slice(0, 50).map(object) :
+    balance.split(' · ').flatMap((part): RecordValue[] => {
+      const match = /^(.+ (?:used|reset)) (\S+)$/.exec(part)
+      if (!match) return []
+      const [, label, text] = match
+      return [{ label, text, percent: /^\d+(?:\.\d+)?%$/.test(text) ? Number(text.slice(0, -1)) : null }]
+    })
+  const resets = new Map(parts.filter(p => !p.error).map(p => [word(p.label), word(p.text)]))
+  const windows = parts.flatMap(p => {
+    const name = word(p.label).match(/^(.+) used$/)?.[1], used = p.percent
+    if (!name || p.error || typeof used !== 'number' || !Number.isFinite(used) || used < 0) return []
+    const reset = resets.get(name + ' reset')
+    return [{ name, used, remaining: Math.max(0, 100 - used),
+      resetsAt: reset && time(reset) ? reset : null, display: '', text: false }]
+  })
+  return windows
+}
 export function parseCards(payload: unknown): QuotaCard[] {
   const data = object(payload).data
   if (!Array.isArray(data)) throw new Error('网关额度接口格式不正确')
@@ -25,11 +47,13 @@ export function parseCards(payload: unknown): QuotaCard[] {
   return data.slice(0, 100).map(value => {
     const card = object(value), provider = word(card.provider)
     const count = (counts.get(provider) || 0) + 1; counts.set(provider, count)
+    const balance = word(card.balance)
+    const balanceQuota = Array.isArray(card.windows) && card.windows.length ? [] : balanceWindows(card.balanceParts, balance)
     return { key: `${provider}:${count}`, provider, name: (word(card.name) || provider) + (count > 1 ? ` · 账户 ${count}` : ''),
-      balance: word(card.balance),
+      balance: balanceQuota.length ? '' : balance,
       error: typeof card.error === 'string' && card.error ? '上游额度读取失败，请在网关中查看详情' : null,
       readAt: time(card.readAt) ? String(card.readAt) : null,
-      windows: (Array.isArray(card.windows) ? card.windows : []).slice(0, 50).map(value => {
+      windows: balanceQuota.length ? balanceQuota : (Array.isArray(card.windows) ? card.windows : []).slice(0, 50).map(value => {
         const w = object(value), hasBalance = typeof w.balance === 'number' && Number.isFinite(w.balance)
         const text = w.text === true || w.unlimited === true || hasBalance
         const used = !text && typeof w.used === 'number' && Number.isFinite(w.used) && w.used >= 0 ? w.used : null
@@ -146,16 +170,22 @@ function averageQuota(cards: QuotaCard[], provider: string, label: string): Quot
         resetsAt: group.resets.sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null }
     }) }
 }
-export function quotaSelection(cards: QuotaCard[], selection = 'auto') {
+export function cchostSource(provider: string): string | undefined {
+  if (provider === 'claude-cchost') return 'cchost · Claude'
+  if (provider === 'gemini-cchost') return 'cchost · Gemini'
+}
+
+export function quotaSelection(cards: QuotaCard[], selection = 'auto', sessionProvider?: string) {
   const automatic = !selection || selection === 'auto'
   const first = cards.find(c => !c.error && (c.balance || c.windows.some(w => w.remaining !== null || w.display)))
     || cards.find(c => !c.error) || cards[0]
-  const provider = automatic ? first?.provider || '' : selection
+  const provider = automatic ? sessionProvider ?? first?.provider ?? '' : selection
   const matches = cards.filter(card => card.provider === provider)
-  const label = matches[0]?.name || provider || '网关'
+  const label = cchostSource(provider) || matches[0]?.name || provider || '网关'
   const card = matches.length === 1 ? matches[0] : averageQuota(matches, provider, label)
-  const message = matches.length > 1 ? `${label} 共 ${matches.length} 个账号，同名额度窗口按有效读数取算术平均；下方保留各账号明细。`
-    : matches.length ? `${label} 账号共享额度；TPS 和用量自动关联当前会话。`
+  const message = automatic && sessionProvider === '' ? '等待当前会话的网关请求来确认额度来源。'
+    : matches.length > 1 ? `${label} 共 ${matches.length} 个账号，同名额度窗口按有效读数取算术平均。下方保留各账号明细。`
+    : matches.length ? `${label} 的账号额度由使用这个账号的所有会话共享。`
     : `尚未读取到 ${label} 额度，请确认网关已提供该来源的额度查询。`
   return { cards: matches, card, label, message, provider, automatic }
 }

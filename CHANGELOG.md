@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Follow the focused conversation's actual provider in automatic quota mode.
+- Display cchost Claude and Gemini quota separately even when both serve the same model.
+- Show configured balance percentages and resets as quota windows when their labels identify what they measure.
+
 ## 0.4.0
 
 - Remove the built-in quota-provider default and supplier-adapter packaging option.

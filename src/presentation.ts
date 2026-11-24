@@ -1,5 +1,5 @@
 import type { ConversationAgent, QuotaCard, QuotaWindow, Session, Snapshot } from './protocol'
-import { isOrca } from './metrics'
+import { isOrca, quotaSelection } from './metrics'
 export type Tone = 'neutral' | 'danger' | 'warning' | 'success' | 'accent'
 export const speedValue = (s: Session): number => s.averageTPS ?? 0
 export const meanLabel = (s: Session): string => s.statsSource === 'antigravity-native' ? '原生请求均速' : '对话生成均速'
@@ -30,6 +30,15 @@ export function currentSession(state: Snapshot): Session | undefined {
     .sort((a,b) => Number(orcaSession(b)) - Number(orcaSession(a)) || b.lastAt - a.lastAt)[0]
 }
 export const statusSessions = (state: Snapshot): Session[] => [currentSession(state)].filter((s): s is Session => !!s)
+export function currentQuota(state: Snapshot) {
+  const session = currentSession(state)
+  const source = state.focusedConversation ? session?.quotaProvider || session?.provider || '' : undefined
+  const binding = quotaSelection(state.cards, state.quotaProvider, source)
+  return {
+    ...binding,
+    error: !state.quotaErrorProvider || state.quotaErrorProvider === binding.provider ? state.quotaError : null,
+  }
+}
 export const compactTokens = (v:number|null|undefined):string => typeof v==='number'&&Number.isFinite(v)
   ?new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(v):'—'
 export const cachePercent = (v:number|null|undefined):string => typeof v==='number'&&Number.isFinite(v)
@@ -50,9 +59,10 @@ export function startTime(value:string|null):string{
   return value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString('zh-CN',{
     year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).replace(/\//g,'-'):'读取中'
 }
+export const remainingQuota = (remaining: number): string => `${Number(remaining.toFixed(2))}%`
 export function quotaLabel(window: QuotaWindow | undefined): string {
   if (window?.text) return window.display || '未提供'
-  return window?.remaining === null || !window ? '未提供' : `余${window.remaining}%`
+  return window?.remaining === null || !window ? '未提供' : `余${remainingQuota(window.remaining)}`
 }
 export function quotaWindowName(name: string, pool = ''): string {
   const label = name === '5 hours' ? '5h' : name === '7 days' ? '7d' : name

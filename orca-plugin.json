@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "magpie-monitor",
   "name": "Magpie 用量与速度",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "读取 Magpie 或兼容网关的额度与会话 TPS、Token、缓存统计，支持 Antigravity 原生测速。",
   "engines": {
     "orca": ">=1.4.258"
@@ -75,7 +75,7 @@
         "title": "额度来源 ID",
         "type": "string",
         "default": "auto",
-        "description": "auto 自动选择网关返回的首个可用来源；也可填写 provider ID 或在面板中选择，不内置供应商适配。"
+        "description": "auto 跟随当前会话实际使用的供应商。没有活动会话时显示首个可用来源。也可在面板中手动固定来源。"
       },
       {
         "key": "baseURL",
