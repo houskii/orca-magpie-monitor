@@ -11,14 +11,14 @@ orca plugin install houskii/orca-magpie-monitor
 固定到当前版本：
 
 ```sh
-orca plugin install houskii/orca-magpie-monitor@v0.4.3
+orca plugin install houskii/orca-magpie-monitor@v0.4.4
 ```
 
 Orca 会先显示插件来源和权限。首次安装按返回的说明完成授权。更新时再次运行安装命令即可；已有设置保留。
 
 ## 从 ZIP 安装
 
-从 [GitHub Releases](https://github.com/houskii/orca-magpie-monitor/releases) 下载 `orca-magpie-monitor-0.4.3-macos-universal.zip` 并解压，将目录放在准备长期保留的位置：
+从 [GitHub Releases](https://github.com/houskii/orca-magpie-monitor/releases) 下载 `orca-magpie-monitor-0.4.4-macos-universal.zip` 并解压，将目录放在准备长期保留的位置：
 
 ```sh
 orca plugin install /absolute/path/orca-magpie-monitor

@@ -428,6 +428,33 @@ test('native Antigravity counters refresh without Magpie requests or an availabl
   await worker.deactivate()
 })
 
+test('native storage failures are logged once and never erase a previously measured speed', async () => {
+  let stop: (() => void) | undefined
+  let fail = true
+  const focus: FocusedConversation = { orcaSession: 'native-orca', session: 'native-thread', workspace: 'workspace', title: '原生会话', agent: 'antigravity', model: 'gemini-4-neon' }
+  const seed = sampleSnapshot().sessions[0]
+  const module = { default(orca: OrcaWorkerApi) { stop = activateMonitor(orca, {
+    send: async input => Response.json(String(input).includes('/trace') ? { routes: [] } : { total: 0, rows: [] }),
+    background: false, conversations: async () => [], focus: async () => focus,
+    native: async () => {
+      if (fail) throw new Error('Antigravity statistics database not found in CLI or legacy ACP storage')
+      return { ...seed, key: 'native-test', session: focus.session, agent: 'antigravity', model: focus.model!,
+        statsSource: 'antigravity-native', averageTPS: 71.5, conversation: { ...focus, prompt: '', updatedAt: instant } }
+    },
+  }) }, deactivate() { stop?.() } }
+  const worker = await mountWorker(module, { host: mockHost({ capabilities: ['settings:own', 'storage:own'], settings: { showQuota: false } }), commands: ['magpie.refresh', 'magpie.sessions'] })
+  await worker.request('monitor.refresh')
+  await worker.request('monitor.refresh')
+  assert.equal(worker.logs.length, 1)
+  fail = false
+  await worker.request('monitor.refresh')
+  fail = true
+  const retained = await worker.request('monitor.refresh')
+  assert.equal(worker.logs.length, 2)
+  assert.equal(retained.sessions[0].averageTPS, 71.5)
+  await worker.deactivate()
+})
+
 test('switching to native Antigravity does not wait for another sessions pending gateway summary', async () => {
   let stop: (() => void) | undefined
   let focus: FocusedConversation = { orcaSession: 'gateway-orca', session: 'gateway-thread', workspace: 'workspace', title: '网关会话', agent: 'codex' }

@@ -1,4 +1,5 @@
 import { isAbsolute, join } from 'node:path'
+import { stat } from 'node:fs/promises'
 import { orcaDataRoot, readSQLite, sessionDatabase } from './conversations'
 import type { FocusedConversation, Session } from './protocol'
 
@@ -9,6 +10,23 @@ export type NativeGeneration = {
   milliseconds: number | null; startedAt: number | null; model: string
 }
 const MAX_FIELDS = 4096, MAX_GENERATIONS = 5000, MAX_ROW_BYTES = 32 * 1024 * 1024
+
+/** Current CLI storage is authoritative when present; legacy ACP is a fallback
+ * only when its replacement file does not exist. Stay inside this account home. */
+export async function nativeConversationDatabase(home: string, session: string): Promise<string> {
+  if (!isAbsolute(home) || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(session))
+    throw new Error('Invalid native conversation location')
+  for (const directory of ['antigravity-cli', 'antigravity-acp']) {
+    const file = join(home, directory, 'conversations', session + '.db')
+    try {
+      if (!(await stat(file)).isFile()) throw new Error('Native conversation store is not a file')
+      return file
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  throw new Error('Antigravity statistics database not found in CLI or legacy ACP storage')
+}
 
 function varint(read: Reader, offset: number, end: number, skipLarge = false): [number, number] {
   let value = 0n
@@ -61,7 +79,8 @@ function time(read: Reader, range: Range | undefined): number | null {
   return seconds * 1000 + nanos / 1e6
 }
 
-/** Field numbers are from Antigravity ACP 1.5.2's embedded protobuf descriptors:
+/** Field numbers are from Antigravity ACP 1.5.2's embedded protobuf descriptors,
+ *  also verified against CLI 1.5.15's stored statistics:
  *  CortexStepGeneratorMetadata.chat_model=1; ChatModelMetadata.usage=4,
  *  chat_start_metadata=9, time_to_first_token=11, streaming_duration=12.
  *  ModelUsageStats.output_tokens includes thinking and response tokens.
@@ -99,7 +118,7 @@ export async function readAntigravitySession(focus: FocusedConversation, now: nu
   if (!record || record.variable !== 'GEMINI_HOME' || typeof record.home !== 'string' || !isAbsolute(record.home)) return null
   // No auth files, prompts or step payloads are opened; only the exact current native conversation's counters.
   const { DatabaseSync } = await import('node:sqlite')
-  const database = new DatabaseSync(join(record.home, 'antigravity-acp', 'conversations', focus.session + '.db'), { readOnly: true })
+  const database = new DatabaseSync(await nativeConversationDatabase(record.home, focus.session), { readOnly: true })
   try {
     database.exec('BEGIN')
     if (!database.prepare('SELECT 1 FROM trajectory_meta WHERE cascade_id=? LIMIT 1').get(focus.session)) return null

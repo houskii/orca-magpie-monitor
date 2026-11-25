@@ -29,6 +29,7 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
   let historyRow: Session | null = null
   let nativeTask: { key: string; task: Promise<void> } | null = null
   let nativeKey = '', nativeAt = -Infinity
+  let nativeFailure = ''
   let previews = new Map<string, ConversationPreview>()
   const popup = options.popup || createPopup(orca.log)
   const barCache = new Map<string, string>()
@@ -137,12 +138,22 @@ export function activateMonitor(orca: OrcaWorkerApi, options: MonitorOptions = {
         const native = await (options.native || readAntigravitySession)(focus, clock())
         if (stopped || state.focusedConversation?.orcaSession !== focus.orcaSession || state.focusedConversation.session !== focus.session) return
         if (native) {
+          nativeFailure = ''
           historyRow = native
           state = { ...state, sessions: [native, ...state.sessions.filter(s => s.key !== native.key)].slice(0, MAX_SESSIONS) }
           attachPreviews()
           await publish()
         }
-      } catch { /* Keep previous native measurements when a local read is temporarily unavailable. */ }
+      } catch (error) {
+        // Keep previous measurements, but report the cause instead of silently
+        // making a missing storage layout look like a session with no requests.
+        if (!stopped && state.focusedConversation?.orcaSession === focus.orcaSession && state.focusedConversation.session === focus.session) {
+          const reason = error instanceof Error ? error.message : 'Native statistics unavailable'
+          const message = `Antigravity native statistics: ${reason.slice(0, 180)}`
+          if (nativeFailure !== message) orca.log(message)
+          nativeFailure = message
+        }
+      }
     })().finally(() => { if (nativeTask?.task === task) nativeTask = null })
     nativeTask = { key, task }
     return task

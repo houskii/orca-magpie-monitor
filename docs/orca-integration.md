@@ -14,11 +14,13 @@ Orca 插件 API 提供侧栏、命令和状态栏。当前标签页与上游会�
 
 ## 原生 Antigravity 统计
 
-没有网关记录的原生 Antigravity 会话，可根据 Orca provider handle 中的 `nativeId` 和运行时目录，定位 `antigravity-acp/conversations/<nativeId>.db`。先验证会话 ID，再只读访问请求元数据。
+没有网关记录的原生 Antigravity 会话，可根据 Orca provider handle 中的 `nativeId` 和运行时目录，优先定位 `antigravity-cli/conversations/<nativeId>.db`。该文件不存在时，兼容旧版 `antigravity-acp/conversations/<nativeId>.db`。两个位置都限定在该会话记录的 `GEMINI_HOME` 下。先验证会话 ID，再只读访问请求元数据。
 
-适配器按 ACP 1.5.2 的记录格式提取 Token、模型名、请求开始时间、首字等待和流式响应耗时。大字段通过 SQLite 分段跳过，不加载提示词、完整回复或工具正文。单次读取有大小与字段数量上限；格式不支持或统计缺失时，不伪造速度。
+适配器按已验证的 ACP 1.5.2 与 CLI 1.5.15 记录格式提取 Token、模型名、请求开始时间、首字等待和流式响应耗时。大字段通过 SQLite 分段跳过，不加载提示词、完整回复或工具正文。单次读取有大小与字段数量上限；格式不支持或统计缺失时，不伪造速度。
 
 原生请求均速使用输出 Token 除以首字等待与流式响应耗时，包含思考输出，排除工具执行和用户停顿。运行时未提供可靠的实时 Token 速度，因此实时显示 `—T/s`。需要 Orca worker 的 Node 支持 `node:sqlite`。
+
+当前 CLI 文件存在时，不会因为文件损坏、不可读或会话 ID 不匹配而套用旧副本。读取失败会写入去重后的插件日志，已有测速读数保留；缺少有效样本时仍显示未知速度。
 
 ## 弹窗
 

@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readAntigravitySession, readNativeGeneration } from './antigravity-source'
+import { nativeConversationDatabase, readAntigravitySession, readNativeGeneration } from './antigravity-source'
 import { attachUsage } from './usage-source'
 import { meanLabel, liveRate } from './presentation'
 import type { FocusedConversation } from './protocol'
@@ -48,11 +48,12 @@ test('missing native timings stay unavailable and malformed counters never becom
   assert.throws(() => readNativeGeneration((a, n) => unsafe.subarray(a, a + n), unsafe.length))
 })
 
-test('native session summaries join the exact provider handle and retain duration-weighted counters', async () => {
+for (const directory of ['antigravity-acp', 'antigravity-cli'])
+test(`native ${directory} summaries join the exact provider handle and retain duration-weighted counters`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'magpie-antigravity-')), home = join(root, 'gemini-home')
   const id = '11111111-1111-4111-8111-111111111111'
   const focus: FocusedConversation = { orcaSession: 'orca-native', session: id, workspace: 'workspace', title: '原生测试', agent: 'antigravity', model: 'gemini-4-neon' }
-  mkdirSync(join(home, 'antigravity-acp', 'conversations'), { recursive: true })
+  mkdirSync(join(home, directory, 'conversations'), { recursive: true })
   try {
     const store = new DatabaseSync(join(root, 'agent-session-domain.db'))
     store.exec('CREATE TABLE agent_session_records(session_id TEXT,record_json TEXT)')
@@ -61,7 +62,7 @@ test('native session summaries join the exact provider handle and retain duratio
       providerHandleChain: [{ handle: { nativeId: id } }], lastTurn: { state: 'open' }
     }))
     store.close()
-    const path = join(home, 'antigravity-acp', 'conversations', id + '.db'), native = new DatabaseSync(path)
+    const path = join(home, directory, 'conversations', id + '.db'), native = new DatabaseSync(path)
     native.exec('CREATE TABLE trajectory_meta(cascade_id TEXT);CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY,data BLOB)')
     native.prepare('INSERT INTO trajectory_meta VALUES(?)').run(id)
     const add = native.prepare('INSERT INTO gen_metadata VALUES(?,?)')
@@ -84,4 +85,23 @@ test('native session summaries join the exact provider handle and retain duratio
     assert.equal(after.prepare('SELECT count(*) AS count FROM gen_metadata').get()?.count, 3)
     after.close()
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('current CLI statistics take precedence and invalid files cannot resurrect a legacy copy', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'magpie-native-paths-'))
+  const id = '11111111-1111-4111-8111-111111111111'
+  const cli = join(home, 'antigravity-cli', 'conversations', id + '.db')
+  const legacy = join(home, 'antigravity-acp', 'conversations', id + '.db')
+  try {
+    await assert.rejects(nativeConversationDatabase(home, id), /not found/)
+    mkdirSync(join(home, 'antigravity-acp', 'conversations'), { recursive: true })
+    const old = new DatabaseSync(legacy); old.close()
+    assert.equal(await nativeConversationDatabase(home, id), legacy)
+    mkdirSync(join(home, 'antigravity-cli', 'conversations'), { recursive: true })
+    const current = new DatabaseSync(cli); current.close()
+    assert.equal(await nativeConversationDatabase(home, id), cli)
+    rmSync(cli); mkdirSync(cli)
+    await assert.rejects(nativeConversationDatabase(home, id), /not a file/)
+    await assert.rejects(nativeConversationDatabase(home, '../../other'), /Invalid/)
+  } finally { rmSync(home, { recursive: true, force: true }) }
 })

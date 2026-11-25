@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4
+
+- Read native Antigravity statistics from both current CLI and legacy ACP account directories.
+- Prefer the current CLI conversation file when present and retain exact native session identity checks.
+- Log deduplicated native storage errors instead of silently treating unreadable statistics as an empty conversation. Preserve previous measurements on transient failures.
+
 ## 0.4.3
 
 - Read focused Antigravity counters independently from pending gateway summaries, so switching sessions does not wait for unrelated requests.
